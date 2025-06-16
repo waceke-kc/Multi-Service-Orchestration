@@ -1,0 +1,36 @@
+syntax = "proto3";
+package myitems;
+
+message ItemRequest {
+  int32 id = 1;
+}
+
+message ItemName {
+    string name = 1;
+}
+
+message ItemResponse {
+  int32 id = 1;
+  string name = 2;
+}
+
+message ItemsCount {
+   int32 total_count = 1;
+}
+
+message ChatMessage {
+  string content = 1;
+}
+
+message Empty {}
+
+service ItemService {
+  
+  rpc GetItemById(ItemRequest) returns (ItemResponse);
+  rpc ListAllItems(Empty) returns (stream ItemResponse);
+  rpc AddItem(ItemName) returns (ItemsCount);
+  rpc AddItems(stream ItemName) returns (ItemsCount);
+  rpc EditItemById(ItemRequest) returns (ItemResponse);
+  rpc DeleteItemById(ItemRequest) returns (ItemsCount);
+  rpc ChatAboutItems(stream ChatMessage) returns (stream ChatMessage);
+}
