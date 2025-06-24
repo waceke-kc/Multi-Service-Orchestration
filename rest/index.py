@@ -40,54 +40,20 @@ def is_grpc_healthy():
     except Exception:
         return False
 
-# In-memory queue for failed add item requests
-failed_requests_queue = queue.Queue()
-
-def retry_failed_requests():
-    while True:
-        item = failed_requests_queue.get()
-        if item is None:
-            break  # Allows for clean shutdown if needed
-        else:
-            if is_grpc_healthy():
-                try:
-                    logging.info("Background retry thread started")
-                    # Try to add the item again using the circuit breaker
-                    response = breaker.call(grpc_create, item)
-                    logging.info(f"Retried item added successfully: {item}")
-                except Exception as e:
-                    logging.error(f"Retry failed for item {item}: {e}")
-                    # Put it back in the queue to try again later
-                    failed_requests_queue.put(item)
-                    # Wait before retrying to avoid tight loop
-                    time.sleep(5)
-                finally:
-                    failed_requests_queue.task_done()
-
-# Start the background worker thread
-worker_thread = threading.Thread(target=retry_failed_requests, daemon=True)
-worker_thread.start()
-
 
 @app.route('/items')
 def get_items():
-    try:
-        logging.info('Fetching all items')
-        # Make the gRPC call to list all items
-        stub = get_grpc_stub()
-        response = stub.ListAllItems(pb2.Empty())
-        items = []
-        for item in response:
-            items.append({"id": item.id, "name": item.name})
-        logging.info(f'Items fetched: {items}')
-        # Return the items as JSON
-        logging.info('Returning items as JSON response')
-    except CircuitBreakerError:
-        logging.warning('Circuit breaker open on GET /items')
-        return jsonify({"error": "Service temporarily unavailable"}), 503
-    except grpc.RpcError:
-        logging.error('gRPC call to list items failed')
-        return jsonify({"error": "Backend unavailable"}), 503
+
+    logging.info('Fetching all items')
+    # Make the gRPC call to list all items
+    stub = get_grpc_stub()
+    response = stub.ListAllItems(pb2.Empty())
+    items = []
+    for item in response:
+        items.append({"id": item.id, "name": item.name})
+    logging.info(f'Items fetched: {items}')
+    # Return the items as JSON
+    logging.info('Returning items as JSON response')
     return jsonify(items)
 
 
@@ -103,12 +69,11 @@ def add_item():
             response = breaker.call(grpc_create, item)
             return {"message": "Item created", "added": response.total_count}, 201
         except CircuitBreakerError:
-            failed_requests_queue.put(item)
+           
             return {"error": "Service is currently unavailable. Please try again later."}, 503
         except grpc.RpcError:
             logging.error(f'Attempt {attempt + 1}: gRPC call failed')
             if attempt == 2:
-                failed_requests_queue.put(item)
                 logging.error('Failed to add item after 3 attempts')
                 break
         time.sleep(delay)
