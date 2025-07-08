@@ -1,7 +1,19 @@
 from flask import Flask, jsonify, request
-import time, random, logging, os, grpc, threading, queue
+import time, logging, os, grpc, threading
 from pybreaker import CircuitBreaker, CircuitBreakerError
 from grpc_health.v1 import health_pb2, health_pb2_grpc
+from prometheus_client import Counter, Histogram, generate_latest
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "Request Latency",
+    ["method", "endpoint"]
+)
+
+REQUEST_COUNTER = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "endpoint", "status"])
 
 breaker = CircuitBreaker(fail_max=3, reset_timeout=30)
 
@@ -30,17 +42,54 @@ def grpc_create(item):
     return stub.AddItem(req, timeout=1)
 
 
-#check if gRPC service is healthy
+#check if gRPC service is healthy 
 def is_grpc_healthy():
     try:
-        stub = get_grpc_stub()
-        response = stub.Check(health_pb2.HealthCheckRequest(service=''), timeout=1)
-        logging.info(f'gRPC Health check result: {response.status}')
+        channel = grpc.insecure_channel(f'{GRPC_HOST}:{GRPC_PORT}', options=(('grpc.enable_http_proxy', 0),))
+        health_stub = health_pb2_grpc.HealthStub(channel)
+        response = health_stub.Check(health_pb2.HealthCheckRequest(service=''), timeout=1)
         return response.status == health_pb2.HealthCheckResponse.SERVING
     except Exception:
         return False
 
+# function to check the health of the gRPC service and control the circuit breaker
+def health_check():
+    while True:
+        health_status = is_grpc_healthy()
+        logging.info(f'Current breaker state: {breaker.current_state}')
 
+        if health_status:
+            if breaker.current_state == 'open':
+                logging.info('gRPC service is healthy, closing the circuit breaker')
+                breaker.close()
+            # Optionally, you can reset the breaker if it was open
+        else:
+            if breaker.current_state == 'closed':
+                logging.warning('gRPC service is unhealthy, opening the circuit breaker')
+                breaker.open()
+        time.sleep(2)  # Check every 2 seconds
+
+# starts a timer for each request
+@app.before_request
+def _start_timer():
+    # returns a stop function bound to the request
+    request._start_time = time.time()
+    
+# after the request is processed, this stops the timer and  record the request duration
+# and increment the request counter
+@app.after_request
+def _after(response):
+    resp_time = time.time() - request._start_time
+    REQUEST_LATENCY.labels(request.method, request.path).observe(resp_time)
+    REQUEST_COUNTER.labels(
+        request.method, request.path, response.status_code).inc()
+    return response
+@app.route('/metrics')
+def metrics():
+    logging.info('Fetching metrics')
+    # Return the Prometheus metrics
+    return generate_latest(), 200, {'Content-Type': 'text/plain; version=0.0.4'}   
+        
 @app.route('/items')
 def get_items():
 
@@ -59,6 +108,11 @@ def get_items():
 
 @app.route('/items', methods=['POST'])
 def add_item():
+    # Check if the gRPC service is healthy before proceeding
+    if breaker.current_state == 'open' or not is_grpc_healthy():
+        logging.warning('Circuit breaker is open or gRPC service is unhealthy')
+        return {"error": "Service is currently unavailable. Please try again later."}, 503
+    # check state of the circuit breaker before proceeding
     logging.info('Adding a new item')
     # item_name = request.get_json()['name']
     item = request.get_json() 
@@ -68,8 +122,10 @@ def add_item():
         try:
             response = breaker.call(grpc_create, item)
             return {"message": "Item created", "added": response.total_count}, 201
-        except CircuitBreakerError:
-           
+        except CircuitBreakerError:     
+            #open the circuit breaker
+            breaker.open()   
+            # return a 503 Service Unavailable response
             return {"error": "Service is currently unavailable. Please try again later."}, 503
         except grpc.RpcError:
             logging.error(f'Attempt {attempt + 1}: gRPC call failed')
@@ -93,4 +149,8 @@ def get_item(id):
 
 if __name__ == "__main__":
     logging.info('Starting the Flask application')
+    # Only start the health check thread in the main process (not the reloader)
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+        health_thread = threading.Thread(target=health_check, name='Health check thread', daemon=True)
+        health_thread.start()
     app.run(debug=True, host='0.0.0.0', port=5000)

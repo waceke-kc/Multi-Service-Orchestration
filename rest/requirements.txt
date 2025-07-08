@@ -9,3 +9,4 @@ grpcio-tools
 grpcio-reflection
 pybreaker
 grpcio-health-checking
+prometheus_client==0.20.0

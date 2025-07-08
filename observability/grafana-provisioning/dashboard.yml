@@ -1,0 +1,11 @@
+ apiVersion: 1
+ providers:
+  - name: golden-signals # appears in UI
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      # import into root folder
+      path: /etc/grafana/provisioning/dashboards

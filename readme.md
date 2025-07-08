@@ -1,28 +1,28 @@
-### Docker Compose & Reliability lab
+### Docker Observability
 
-#### Container setup
-In order to set up the containers, just ensure that you are withing the main folder and then run the command  to build the containers and run them in the background
+First step was to update the requirements.txt files with
+    py-grpc-prometheus==0.8.0
+    prometheus_client==0.20.0
 
-    docker compose up -d
+#### Prometheus Setup
 
+After adding the recommended code from the lab instructions to the REST and gRPC code and rebuilding the containers, use [Prometheus](http://localhost:9090/targets) to check the status of the prometheus endpoints. 
 
-#### Verification 
+#### Grafana Setup
+After confirming that Prometheus is up, login to Grafana at [Grafana](http://localhost:3000). The initial username is <b>admin</b> and the initial password is also <b>admin</b>. 
 
-You can verify that the containers are working correcctly by running the following commands
+Once logged into Grafana, set up the datasource to connect to Prometheus as explained in the instructions. 
 
-    grpcurl -plaintext localhost:50051 list myitems.ItemService
+After that, create the dashboards as need or you can import the json file <b>Items Dashboard.json</b> which is in the root of this directory and get a premade dashboard. 
 
-to see that the GPRC container is up
+#### Important commands
 
-    curl   'http://localhost:5000/items'  
+To start the container use:
+    docker-compose up -d
 
-to check the rest container and 
+To stop the container use:
+    docker-compose stop
 
-     docker exec -it mongodb mongosh
+To check the status of the containers use:
+    docker ps
 
-to log into the mongodb container shell and see the collection. Or you can use whatever other mean work for you. 
-
-
-Useful commands
-
-- docker ps --format 'table {{.Names}}     {{.Status}}     {{.Ports}}'

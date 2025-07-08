@@ -2,6 +2,8 @@ import grpc
 #add grpc_reflection
 from grpc_reflection.v1alpha import reflection
 from grpc_health.v1 import health, health_pb2_grpc, health_pb2
+from py_grpc_prometheus.prometheus_server_interceptor import PromServerInterceptor
+from prometheus_client import start_http_server
 from concurrent import futures
 from pymongo import MongoClient
 import os
@@ -109,6 +111,10 @@ class LoggingInterceptor(grpc.ServerInterceptor):
 
 def serve():
     interceptors = [LoggingInterceptor()] if ENABLE_LOGGING_INTERCEPTOR else []
+    interceptors.append(PromServerInterceptor(enable_handling_time_histogram=True))
+    # 1. Start the HTTP endpoint *before* the gRPC server
+    start_http_server(9103)  # Start Prometheus metrics server on port 9103
+
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=10),
         interceptors=interceptors
@@ -131,7 +137,8 @@ def serve():
             reflection.SERVICE_NAME,
         )
         reflection.enable_server_reflection(SERVICE_NAMES, server)
-   
+
+
     server.add_insecure_port('[::]:50051')
     server.start()
     logging.info(f"*** gRPC server started with default items loaded. Listening on port 50051\n")

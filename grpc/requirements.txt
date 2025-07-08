@@ -2,3 +2,5 @@ grpcio-tools
 grpcio-reflection
 grpcio-health-checking
 pymongo
+py-grpc-prometheus==0.8.0
+prometheus_client==0.20.0
